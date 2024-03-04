@@ -21,6 +21,7 @@ namespace HL7lite
         public HL7Encoding Encoding { get; set; } = new HL7Encoding();
 
         private const string segmentRegex = "^[A-Z][A-Z][A-Z0-9]$";
+        //private const string segmentRegex = "^[A-Z][A-Z][A-Z0-9]([\\(\\[]([0-9]+)[\\)\\]]){0,1}$";
         private const string fieldRegex = @"^([0-9]+)([\(\[]([0-9]+)[\)\]]){0,1}$";
         private const string otherRegEx = @"^[1-9]([0-9]{1,2})?$";
 
@@ -57,15 +58,17 @@ namespace HL7lite
         /// <summary>
         /// Parse the HL7 message in text format, throws HL7Exception if error occurs
         /// </summary>
-        /// <param name="serializeCheck">If true (default) the message wil be serialized back to a string and compared with the original (throws if not eq)</param>
-        /// <exception>fails with an exception wheren parsing isn't succesful</exception>
-        public void ParseMessage(bool serializeCheck = true)
+        /// <param name="serializeCheck">If true (default) the message will be serialized back to a string and compared with the original (throws if not eq)</param>
+        /// <param name="validate">If true (default) the message will be validated for required HL7 entries</param>
+        /// <exception>fails with an exception where parsing isn't successful</exception>
+        public void ParseMessage(bool serializeCheck = true, bool validate = true)
         {
             // domibies 2 april 2021 : this method used to return a boolean, which was confusing (caller had to filter & exceptions AND check return value)
             // now it just throws HL7Exception on any failure
             try
             {
-                this.validateMessage();
+                if(validate)
+                    this.validateMessage();
             }
             catch (HL7Exception ex)
             {
@@ -223,6 +226,9 @@ namespace HL7lite
                         try
                         {
                             var field = this.getField(segment, allComponents[1]);
+                            int maxComponent = field.Components().Count();
+                            if (componentIndex >= maxComponent)
+                                throw new HL7Exception("Component {componentIndex} is beyond max {maxComponent}");
                             strValue = field.ComponentList[componentIndex - 1].SubComponentList[subComponentIndex - 1].SerializeValue();
                         }
                         catch (Exception ex)
@@ -237,6 +243,9 @@ namespace HL7lite
                         try
                         {
                             var field = this.getField(segment, allComponents[1]);
+                            int maxComponent = field.Components().Count();
+                            if (componentIndex >= maxComponent)
+                                throw new HL7Exception("Component {componentIndex} is beyond max {maxComponent}");
                             strValue = field.ComponentList[componentIndex - 1].SerializeValue();
                         }
                         catch (Exception ex)
@@ -328,10 +337,8 @@ namespace HL7lite
                         else
                             field.Value = strValue;
                     }
-
                     else
                         segment.Value = strValue;
-
                 }
                 else
                     throw new HL7Exception("Segment name not available");
@@ -671,6 +678,23 @@ namespace HL7lite
         }
 
         /// <summary>
+        /// Adds an empty header segment to a new message
+        /// </summary>
+        public void AddSegmentMSH()
+        {
+            var seg = new Segment("MSH", Encoding);
+            var delimiter1 = new Field(Encoding);
+            delimiter1.IsDelimiters = true;
+            delimiter1.Value = $"{Encoding.FieldDelimiter}";
+            seg.AddNewField(delimiter1, 1);
+            var delimiters = new Field(Encoding);
+            delimiters.IsDelimiters = true;
+            delimiters.Value = $"{Encoding.ComponentDelimiter}{Encoding.RepeatDelimiter}{Encoding.EscapeCharacter}{Encoding.SubComponentDelimiter}";
+            seg.AddNewField(delimiters, 2);
+            AddNewSegment(seg);
+        }
+
+        /// <summary>
         /// Serialize to MLLP escaped byte array
         /// </summary>
         /// <param name="validate">Optional. Validate the message before serializing</param>
@@ -761,7 +785,7 @@ namespace HL7lite
         private Field getField(Segment segment, string index, bool firstRepetition = true) 
         {
             /*
-             * If we don't specifiy a repetition index, and there are repetitions in a field
+             * If we don't specify a repetition index, and there are repetitions in a field
              * getField() returns the first repetition if (firstRepetition==true) (default)
              * 
              * If (firstRepetition==false) we will return the 'base field' in that case
@@ -781,6 +805,10 @@ namespace HL7lite
                 if (Int32.TryParse(matches[0].Groups[3].Value, out repetition))
                     repetition--;
             }
+
+            int maxFields = segment.GetAllFields().Count();
+            if (fieldIndex >= maxFields) //throw an HL7Exception instead of a NullReferenceException
+                throw new HL7Exception("Field {fieldIndex} is beyond max {maxComponent}");
 
             var field = segment.FieldList[fieldIndex];
 
